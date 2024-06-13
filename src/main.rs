@@ -12,6 +12,32 @@ fn next_color(color: Color) -> Color {
     }
 }
 
+enum Dir {
+    Up,
+    Down,
+    Left,
+    Right,
+    UpLeft,
+    UpRight,
+    DownLeft,
+    DownRight,
+}
+
+impl Dir {
+    fn dir_to_tuple(dir: Dir) -> (i32, i32) {
+        match dir {
+            Dir::Up => (0, 1),
+            Dir::Down => (0, -1),
+            Dir::Left => (-1, 0),
+            Dir::Right => (1, 0),
+            Dir::UpLeft => (-1, 1),
+            Dir::UpRight => (1, 1),
+            Dir::DownLeft => (-1, -1),
+            Dir::DownRight => (1, -1),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Square {
     Unoccupied,
