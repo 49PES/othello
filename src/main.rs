@@ -1,3 +1,5 @@
+use anyhow::anyhow;
+use anyhow::Result;
 use std::fmt::Display;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +26,7 @@ enum Dir {
 }
 
 impl Dir {
-    fn dir_to_tuple(dir: Dir) -> (i32, i32) {
+    fn dir_to_offset(dir: &Dir) -> (i32, i32) {
         match dir {
             Dir::Up => (0, 1),
             Dir::Down => (0, -1),
@@ -36,6 +38,19 @@ impl Dir {
             Dir::DownRight => (1, -1),
         }
     }
+
+    fn dirs() -> Vec<Dir> {
+        vec![
+            Dir::Up,
+            Dir::Down,
+            Dir::Left,
+            Dir::Right,
+            Dir::UpLeft,
+            Dir::UpRight,
+            Dir::DownLeft,
+            Dir::DownRight,
+        ]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +59,7 @@ enum Square {
     Occupied(Color),
 }
 
+#[derive(Debug, Copy, Clone)]
 struct Posn {
     row: usize,
     col: usize,
@@ -51,10 +67,6 @@ struct Posn {
 
 // (row, col) are 0-indexed positions on the board
 impl Posn {
-    fn new(row: usize, col: usize) -> Posn {
-        Posn { row, col }
-    }
-
     // "a1" -> Posn { row: 0, col: 0 }
     // "e3" -> Posn { row: 2, col: 4 }
     fn alphanumeric_to_posn(s: String) -> Posn {
@@ -62,6 +74,16 @@ impl Posn {
         let row = s[1].to_digit(10).unwrap() as usize - 1;
         let col = s[0].to_ascii_lowercase() as usize - 'a' as usize;
         Posn { row, col }
+    }
+
+    fn try_from_tuple(coords: (i32, i32)) -> Result<Self> {
+        if coords.0 < 0 || coords.0 >= 8 || coords.1 < 0 || coords.1 >= 8 {
+            return Err(anyhow!("Position out of bounds: {:?}", coords));
+        }
+        Ok(Posn {
+            row: coords.0 as usize,
+            col: coords.1 as usize,
+        })
     }
 }
 
@@ -92,8 +114,8 @@ impl Display for Board {
             for col in 0..8 {
                 grid[row][col] = match self.squares[row][col] {
                     Square::Unoccupied => '_',
-                    Square::Occupied(Color::Black) => 'X',
-                    Square::Occupied(Color::White) => 'O',
+                    Square::Occupied(Color::Black) => '○',
+                    Square::Occupied(Color::White) => '●',
                 }
             }
         }
@@ -110,16 +132,20 @@ impl Display for Board {
 }
 
 impl Board {
-    fn piece_at(&self, posn: Posn) -> Square {
+    fn piece_at(&self, posn: &Posn) -> Square {
         self.squares[posn.row][posn.col]
+    }
+
+    fn set_piece_at(&mut self, posn: &Posn, square: Square) {
+        self.squares[posn.row][posn.col] = square;
     }
 
     fn count_pieces(&self, color: Color) -> usize {
         let mut count = 0;
         for row in 0..8 {
             for col in 0..8 {
-                let position = Posn::new(row, col);
-                if self.piece_at(position) == Square::Occupied(color) {
+                let position = Posn { row, col };
+                if self.piece_at(&position) == Square::Occupied(color) {
                     count += 1;
                 }
             }
@@ -139,25 +165,102 @@ impl Board {
         let mut board = self;
         board.squares[posn.row][posn.col] = Square::Occupied(board.turn);
 
-        // TODO: flip pieces
+        let flipped_pieces = self.potential_flipped_pieces(&posn);
+
+        for posn in flipped_pieces {
+            board.set_piece_at(&posn, Square::Occupied(board.turn));
+        }
 
         board.turn = next_color(board.turn);
         board
     }
-}
 
+    fn is_legal(&self, posn: &Posn) -> bool {
+        self.piece_at(posn) == Square::Unoccupied && self.potential_flipped_pieces(posn).len() > 0
+    }
+
+    fn legal_moves(&self) -> Vec<Posn> {
+        let mut moves: Vec<Posn> = vec![];
+        for row in 0..8 {
+            for col in 0..8 {
+                let posn = Posn { row, col };
+                if self.is_legal(&posn) {
+                    moves.push(posn);
+                }
+            }
+        }
+        moves
+    }
+    fn potential_flipped_pieces_in_dir(&self, posn: &Posn, dir: Dir) -> Vec<Posn> {
+        let mut line: Vec<Posn> = vec![];
+        let (offset_row, offset_col) = Dir::dir_to_offset(&dir);
+        let neighbor_coordinates = (posn.row as i32 + offset_row, posn.col as i32 + offset_col);
+        match Posn::try_from_tuple(neighbor_coordinates) {
+            Ok(mut neighbor) => match self.piece_at(&neighbor) {
+                Square::Unoccupied => vec![],
+                Square::Occupied(color) => {
+                    if color == self.turn {
+                        vec![]
+                    } else {
+                        let mut next_neighbor_coordinates: (i32, i32) = (
+                            neighbor_coordinates.0 + offset_row,
+                            neighbor_coordinates.1 + offset_col,
+                        );
+                        while let Ok(next_neighbor) =
+                            Posn::try_from_tuple(next_neighbor_coordinates)
+                        {
+                            line.push(neighbor);
+                            match self.piece_at(&next_neighbor) {
+                                Square::Unoccupied => break,
+                                Square::Occupied(color) => {
+                                    if color == self.turn {
+                                        return line;
+                                    }
+                                    neighbor = next_neighbor;
+                                    next_neighbor_coordinates = (
+                                        next_neighbor_coordinates.0 + offset_row,
+                                        next_neighbor_coordinates.1 + offset_col,
+                                    );
+                                }
+                            }
+                        }
+                        vec![]
+                    }
+                }
+            },
+            Err(_) => vec![],
+        }
+    }
+
+    // Returns the positions of pieces that can be flipped
+    fn potential_flipped_pieces(&self, posn: &Posn) -> Vec<Posn> {
+        let mut potential_flipped_pieces: Vec<Posn> = vec![];
+        for dir in Dir::dirs() {
+            potential_flipped_pieces.append(&mut self.potential_flipped_pieces_in_dir(posn, dir));
+        }
+        potential_flipped_pieces
+    }
+}
 fn main() {
     let mut board = initialize_board();
     println!("{}", board);
+    /*
+        let alpha_moves = ["a1", "b1", "h2"];
+        let moves: Vec<Posn> = alpha_moves
+            .iter()
+            .map(|m| Posn::alphanumeric_to_posn(m.to_string()))
+            .collect();
+    */
 
-    let alpha_moves = ["a1", "b1", "h2"];
-    let moves: Vec<Posn> = alpha_moves
-        .iter()
-        .map(|m| Posn::alphanumeric_to_posn(m.to_string()))
-        .collect();
-
-    for m in moves {
-        board = board.play_move(m);
-        println!("{}", &board);
+    while board.legal_moves().len() > 0 {
+        // let mut input = String::new();
+        // std::io::stdin().read_line(&mut input).unwrap();
+        // let posn = Posn::alphanumeric_to_posn(input.trim().to_string());
+        // board = board.play_move(posn);
+        // println!("{}", board);
+        let moves = board.legal_moves();
+        let posn = moves[0];
+        board = board.play_move(posn);
+        println!("{}", board);
     }
 }
