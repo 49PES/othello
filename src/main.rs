@@ -252,7 +252,7 @@ fn main() {
             .collect();
     */
 
-    while board.legal_moves().len() > 0 {
+    while !board.legal_moves().is_empty() {
         // let mut input = String::new();
         // std::io::stdin().read_line(&mut input).unwrap();
         // let posn = Posn::alphanumeric_to_posn(input.trim().to_string());
