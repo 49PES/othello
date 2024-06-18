@@ -1,6 +1,18 @@
-use anyhow::anyhow;
-use anyhow::Result;
 use std::fmt::Display;
+
+const ROWS: usize = 8;
+const COLS: usize = 8;
+const DIRS: [Dir; 8] = [
+    Dir::Up,
+    Dir::Down,
+    Dir::Left,
+    Dir::Right,
+    Dir::UpLeft,
+    Dir::UpRight,
+    Dir::DownLeft,
+    Dir::DownRight,
+];
+const POSNS: [Posn; ROWS * COLS] = generate_positions();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Color {
@@ -14,6 +26,7 @@ fn next_color(color: Color) -> Color {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Dir {
     Up,
     Down,
@@ -38,19 +51,6 @@ impl Dir {
             Dir::DownRight => (1, -1),
         }
     }
-
-    fn dirs() -> Vec<Dir> {
-        vec![
-            Dir::Up,
-            Dir::Down,
-            Dir::Left,
-            Dir::Right,
-            Dir::UpLeft,
-            Dir::UpRight,
-            Dir::DownLeft,
-            Dir::DownRight,
-        ]
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +65,17 @@ struct Posn {
     col: usize,
 }
 
+impl Display for Posn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}",
+            ('a' as u8 + self.col as u8) as char,
+            self.row + 1
+        )
+    }
+}
+
 // (row, col) are 0-indexed positions on the board
 impl Posn {
     // "a1" -> Posn { row: 0, col: 0 }
@@ -76,47 +87,67 @@ impl Posn {
         Posn { row, col }
     }
 
-    fn try_from_tuple(coords: (i32, i32)) -> Result<Self> {
-        if coords.0 < 0 || coords.0 >= 8 || coords.1 < 0 || coords.1 >= 8 {
-            return Err(anyhow!("Position out of bounds: {:?}", coords));
+    fn try_from_tuple(coords: (i32, i32)) -> Option<Self> {
+        if (0..ROWS as i32).contains(&coords.0) && (0..COLS as i32).contains(&coords.1) {
+            Some(Posn {
+                row: coords.0 as usize,
+                col: coords.1 as usize,
+            })
+        } else {
+            None
         }
-        Ok(Posn {
-            row: coords.0 as usize,
-            col: coords.1 as usize,
-        })
+    }
+
+    fn neighbor_in_dir(&self, dir: &Dir) -> Option<Self> {
+        let (offset_row, offset_col) = Dir::dir_to_offset(dir);
+        Posn::try_from_tuple((self.row as i32 + offset_row, self.col as i32 + offset_col))
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+const fn generate_positions() -> [Posn; ROWS * COLS] {
+    let mut posns = [Posn { row: 0, col: 0 }; ROWS * COLS];
+    let mut i = 0;
+    while i < ROWS {
+        let mut j = 0;
+        while j < COLS {
+            posns[i * COLS + j] = Posn { row: i, col: j };
+            j += 1;
+        }
+        i += 1;
+    }
+    posns
+}
+
+#[derive(Debug, Clone)]
 struct Board {
-    squares: [[Square; 8]; 8],
+    squares: [[Square; COLS]; ROWS],
     turn: Color,
 }
 
-// Othello board — put initial pieces on the board at the center
-fn initialize_board() -> Board {
-    let mut board = [[Square::Unoccupied; 8]; 8];
-    board[3][3] = Square::Occupied(Color::Black);
-    board[3][4] = Square::Occupied(Color::White);
-    board[4][3] = Square::Occupied(Color::White);
-    board[4][4] = Square::Occupied(Color::Black);
+impl Board {
+    fn new() -> Self {
+        let mut board = [[Square::Unoccupied; COLS]; ROWS];
+        board[ROWS / 2 - 1][COLS / 2 - 1] = Square::Occupied(Color::Black);
+        board[ROWS / 2 - 1][COLS / 2] = Square::Occupied(Color::White);
+        board[ROWS / 2][COLS / 2 - 1] = Square::Occupied(Color::White);
+        board[ROWS / 2][COLS / 2] = Square::Occupied(Color::Black);
 
-    Board {
-        squares: board,
-        turn: Color::Black,
+        Self {
+            squares: board,
+            turn: Color::Black,
+        }
     }
 }
 
 impl Display for Board {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut grid: Vec<Vec<char>> = vec![vec!['_'; 8]; 8];
-        for row in 0..8 {
-            for col in 0..8 {
-                grid[row][col] = match self.squares[row][col] {
-                    Square::Unoccupied => '_',
-                    Square::Occupied(Color::Black) => '○',
-                    Square::Occupied(Color::White) => '●',
-                }
+        let mut grid: Vec<Vec<char>> = vec![vec!['_'; COLS]; ROWS];
+
+        for posn in POSNS {
+            match self.piece_at(&posn) {
+                Square::Unoccupied => grid[posn.row][posn.col] = '_',
+                Square::Occupied(Color::Black) => grid[posn.row][posn.col] = '○',
+                Square::Occupied(Color::White) => grid[posn.row][posn.col] = '●',
             }
         }
 
@@ -141,16 +172,10 @@ impl Board {
     }
 
     fn count_pieces(&self, color: Color) -> usize {
-        let mut count = 0;
-        for row in 0..8 {
-            for col in 0..8 {
-                let position = Posn { row, col };
-                if self.piece_at(&position) == Square::Occupied(color) {
-                    count += 1;
-                }
-            }
-        }
-        count
+        POSNS
+            .into_iter()
+            .filter(|posn| self.piece_at(posn) == Square::Occupied(color))
+            .count()
     }
 
     // board -> (black, white)
@@ -162,87 +187,59 @@ impl Board {
     }
 
     fn play_move(self, posn: Posn) -> Board {
-        let mut board = self;
-        board.squares[posn.row][posn.col] = Square::Occupied(board.turn);
+        let mut board = self.clone();
 
-        let flipped_pieces = self.potential_flipped_pieces(&posn);
-
+        let flipped_pieces = board.potential_flipped_pieces(&posn);
         for posn in flipped_pieces {
             board.set_piece_at(&posn, Square::Occupied(board.turn));
         }
+        board.set_piece_at(&posn, Square::Occupied(board.turn));
 
         board.turn = next_color(board.turn);
         board
     }
 
     fn is_legal(&self, posn: &Posn) -> bool {
-        self.piece_at(posn) == Square::Unoccupied && self.potential_flipped_pieces(posn).len() > 0
+        self.piece_at(posn) == Square::Unoccupied && !self.potential_flipped_pieces(posn).is_empty()
     }
 
     fn legal_moves(&self) -> Vec<Posn> {
-        let mut moves: Vec<Posn> = vec![];
-        for row in 0..8 {
-            for col in 0..8 {
-                let posn = Posn { row, col };
-                if self.is_legal(&posn) {
-                    moves.push(posn);
-                }
-            }
-        }
-        moves
+        POSNS
+            .into_iter()
+            .filter(|posn| self.is_legal(posn))
+            .collect()
     }
     fn potential_flipped_pieces_in_dir(&self, posn: &Posn, dir: Dir) -> Vec<Posn> {
         let mut line: Vec<Posn> = vec![];
-        let (offset_row, offset_col) = Dir::dir_to_offset(&dir);
-        let neighbor_coordinates = (posn.row as i32 + offset_row, posn.col as i32 + offset_col);
-        match Posn::try_from_tuple(neighbor_coordinates) {
-            Ok(mut neighbor) => match self.piece_at(&neighbor) {
-                Square::Unoccupied => vec![],
-                Square::Occupied(color) => {
-                    if color == self.turn {
-                        vec![]
-                    } else {
-                        let mut next_neighbor_coordinates: (i32, i32) = (
-                            neighbor_coordinates.0 + offset_row,
-                            neighbor_coordinates.1 + offset_col,
-                        );
-                        while let Ok(next_neighbor) =
-                            Posn::try_from_tuple(next_neighbor_coordinates)
-                        {
-                            line.push(neighbor);
-                            match self.piece_at(&next_neighbor) {
-                                Square::Unoccupied => break,
-                                Square::Occupied(color) => {
-                                    if color == self.turn {
-                                        return line;
-                                    }
-                                    neighbor = next_neighbor;
-                                    next_neighbor_coordinates = (
-                                        next_neighbor_coordinates.0 + offset_row,
-                                        next_neighbor_coordinates.1 + offset_col,
-                                    );
-                                }
-                            }
-                        }
-                        vec![]
-                    }
+        let mut curr_neighbor = posn.neighbor_in_dir(&dir);
+        while let Some(curr) = curr_neighbor {
+            match self.piece_at(&curr) {
+                Square::Occupied(color) if color == self.turn => {
+                    return line;
                 }
-            },
-            Err(_) => vec![],
+                Square::Occupied(_other_color) => {
+                    line.push(curr);
+                }
+                Square::Unoccupied => {
+                    return vec![];
+                }
+            }
+            curr_neighbor = curr.neighbor_in_dir(&dir);
         }
+
+        // we've run off the board: if we haven't already returned, then there's no second tile to
+        // surround any of the current line, and there's no flips in this direction
+        vec![]
     }
 
-    // Returns the positions of pieces that can be flipped
     fn potential_flipped_pieces(&self, posn: &Posn) -> Vec<Posn> {
-        let mut potential_flipped_pieces: Vec<Posn> = vec![];
-        for dir in Dir::dirs() {
-            potential_flipped_pieces.append(&mut self.potential_flipped_pieces_in_dir(posn, dir));
-        }
-        potential_flipped_pieces
+        DIRS.into_iter()
+            .flat_map(|dir| self.potential_flipped_pieces_in_dir(posn, dir))
+            .collect()
     }
 }
 fn main() {
-    let mut board = initialize_board();
+    let mut board = Board::new();
     println!("{}", board);
     /*
         let alpha_moves = ["a1", "b1", "h2"];
@@ -262,5 +259,12 @@ fn main() {
         let posn = moves[0];
         board = board.play_move(posn);
         println!("{}", board);
+    }
+
+    println!("Score: {:?}", board.score());
+    match board.score() {
+        (black, white) if black > white => println!("Black wins!"),
+        (black, white) if white > black => println!("White wins!"),
+        _ => println!("Tie!"),
     }
 }
