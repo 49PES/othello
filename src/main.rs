@@ -141,13 +141,20 @@ impl Board {
 
 impl Display for Board {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut grid: Vec<Vec<char>> = vec![vec!['_'; COLS]; ROWS];
+        let mut grid: Vec<Vec<char>> = vec![vec!['_'; COLS + 1]; ROWS + 1];
+        grid[0][0] = ' ';
+        for row in 0..ROWS {
+            grid[row + 1][0] = (row + 1).to_string().chars().next().unwrap();
+        }
 
+        for col in 0..COLS {
+            grid[0][col + 1] = ('a' as u8 + col as u8) as char;
+        }
         for posn in POSNS {
             match self.piece_at(&posn) {
-                Square::Unoccupied => grid[posn.row][posn.col] = '_',
-                Square::Occupied(Color::Black) => grid[posn.row][posn.col] = '○',
-                Square::Occupied(Color::White) => grid[posn.row][posn.col] = '●',
+                Square::Unoccupied => grid[posn.row + 1][posn.col + 1] = '_',
+                Square::Occupied(Color::Black) => grid[posn.row + 1][posn.col + 1] = '○',
+                Square::Occupied(Color::White) => grid[posn.row + 1][posn.col + 1] = '●',
             }
         }
 
@@ -239,24 +246,54 @@ impl Board {
     }
 }
 fn main() {
+    println!("Enter a legal alphanumeric position (e.g. \"e4\") to play a move");
+    println!("Enter \"moves\" to see all legal moves");
+    println!("Enter \"quit\" to quit the game");
+
     let mut board = Board::new();
     println!("{}", board);
-    /*
-        let alpha_moves = ["a1", "b1", "h2"];
-        let moves: Vec<Posn> = alpha_moves
-            .iter()
-            .map(|m| Posn::alphanumeric_to_posn(m.to_string()))
-            .collect();
-    */
 
     while !board.legal_moves().is_empty() {
-        // let mut input = String::new();
-        // std::io::stdin().read_line(&mut input).unwrap();
-        // let posn = Posn::alphanumeric_to_posn(input.trim().to_string());
-        // board = board.play_move(posn);
-        // println!("{}", board);
-        let moves = board.legal_moves();
-        let posn = moves[0];
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
+
+        if input.trim() == "moves" {
+            let mut moves = String::new();
+            match board.turn {
+                Color::Black => {
+                    moves.push_str("Black's moves: ");
+                }
+                Color::White => {
+                    moves.push_str("White's moves: ");
+                }
+            }
+
+            for posn in &board.legal_moves() {
+                moves.push_str(&format!("{}, ", posn));
+            }
+            // Remove trailing comma and space
+            moves.pop();
+            moves.pop();
+            println!("{}", moves);
+            continue;
+        }
+
+        if input.trim() == "quit" {
+            break;
+        }
+
+        if input.trim().len() != 2
+            || !input.trim().chars().nth(0).unwrap().is_alphabetic()
+            || !input.trim().chars().nth(1).unwrap().is_numeric()
+        {
+            println!("Invalid input");
+            continue;
+        }
+        let posn = Posn::alphanumeric_to_posn(input.trim().to_string());
+        if !board.is_legal(&posn) {
+            println!("Invalid move");
+            continue;
+        }
         board = board.play_move(posn);
         println!("{}", board);
     }
