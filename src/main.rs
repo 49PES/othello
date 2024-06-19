@@ -98,6 +98,7 @@ impl Posn {
         }
     }
 
+    /// Find the neighbor in the given direction, if it exists
     fn neighbor_in_dir(&self, dir: &Dir) -> Option<Self> {
         let (offset_row, offset_col) = Dir::dir_to_offset(dir);
         Posn::try_from_tuple((self.row as i32 + offset_row, self.col as i32 + offset_col))
@@ -141,7 +142,10 @@ impl Board {
 
 impl Display for Board {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // +1 Padding to apply alphanumeric descriptions along the top row & columns
         let mut grid: Vec<Vec<char>> = vec![vec!['_'; COLS + 1]; ROWS + 1];
+
+        // Letters along the top row to describe columns, numbers along the left column to describe rows
         grid[0][0] = ' ';
         for row in 0..ROWS {
             grid[row + 1][0] = (row + 1).to_string().chars().next().unwrap();
@@ -150,6 +154,7 @@ impl Display for Board {
         for col in 0..COLS {
             grid[0][col + 1] = ('a' as u8 + col as u8) as char;
         }
+
         for posn in POSNS {
             match self.piece_at(&posn) {
                 Square::Unoccupied => grid[posn.row + 1][posn.col + 1] = '_',
@@ -178,18 +183,18 @@ impl Board {
         self.squares[posn.row][posn.col] = square;
     }
 
-    fn count_pieces(&self, color: Color) -> usize {
+    fn count_color_pieces(&self, color: Color) -> usize {
         POSNS
             .into_iter()
             .filter(|posn| self.piece_at(posn) == Square::Occupied(color))
             .count()
     }
 
-    // board -> (black, white)
+    // Board -> (# of Black pieces, # of White pieces)
     fn score(&self) -> (usize, usize) {
         (
-            self.count_pieces(Color::Black),
-            self.count_pieces(Color::White),
+            self.count_color_pieces(Color::Black),
+            self.count_color_pieces(Color::White),
         )
     }
 
@@ -216,9 +221,13 @@ impl Board {
             .filter(|posn| self.is_legal(posn))
             .collect()
     }
+
     fn potential_flipped_pieces_in_dir(&self, posn: &Posn, dir: Dir) -> Vec<Posn> {
         let mut line: Vec<Posn> = vec![];
         let mut curr_neighbor = posn.neighbor_in_dir(&dir);
+
+        // Keep going until we run off the board or find an unoccupied square (no pieces to flip),
+        // or find a piece of the same color (we've found a flip)
         while let Some(curr) = curr_neighbor {
             match self.piece_at(&curr) {
                 Square::Occupied(color) if color == self.turn => {
@@ -234,7 +243,7 @@ impl Board {
             curr_neighbor = curr.neighbor_in_dir(&dir);
         }
 
-        // we've run off the board: if we haven't already returned, then there's no second tile to
+        // We've run off the board: if we haven't already returned, then there's no second tile to
         // surround any of the current line, and there's no flips in this direction
         vec![]
     }
