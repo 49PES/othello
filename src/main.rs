@@ -104,10 +104,30 @@ impl Posn {
         }
     }
 
+    fn to_tuple(&self) -> (usize, usize) {
+        (self.row, self.col)
+    }
+
     /// Find the neighbor in the given direction, if it exists
     fn neighbor_in_dir(&self, dir: &Dir) -> Option<Self> {
         let (offset_row, offset_col) = Dir::dir_to_offset(dir);
         Posn::try_from_tuple((self.row as i32 + offset_row, self.col as i32 + offset_col))
+    }
+
+    fn is_row_edge(&self) -> bool {
+        self.row == 0 || self.row == ROWS - 1
+    }
+
+    fn is_col_edge(&self) -> bool {
+        self.col == 0 || self.col == COLS - 1
+    }
+
+    fn is_edge(&self) -> bool {
+        self.is_row_edge() || self.is_col_edge()
+    }
+
+    fn is_corner(&self) -> bool {
+        self.is_row_edge() && self.is_col_edge()
     }
 }
 
@@ -201,7 +221,8 @@ impl Board {
             .into_iter()
             .any(|posn| self.piece_at(&posn) == Square::Unoccupied)
     }
-    // Board -> # of White pieces - # of Black pieces
+
+    /// Board → # of White pieces - # of Black pieces
     fn score(&self) -> i32 {
         self.count_color_pieces(Color::White) as i32 - self.count_color_pieces(Color::Black) as i32
     }
@@ -263,6 +284,31 @@ impl Board {
     }
 }
 
+fn standard_heuristic(board: &Board) -> i32 {
+    board.score()
+}
+
+/// Heuristic that favors edge and corner positions (corners/edges/else = 4/2/1)
+fn edge_corner_heuristic(board: &Board) -> i32 {
+    fn color_weighted_score(board: &Board, color: Color) -> i32 {
+        let mut total = 0;
+        for posn in POSNS {
+            if board.piece_at(&posn) == Square::Occupied(color) {
+                total += if posn.is_corner() {
+                    4
+                } else if posn.is_edge() {
+                    2
+                } else {
+                    1
+                }
+            }
+        }
+        total
+    }
+
+    color_weighted_score(board, Color::White) - color_weighted_score(board, Color::Black)
+}
+
 // Random agent that chooses a random legal move
 fn random_agent(board: &Board) -> Posn {
     let legal_moves = board.legal_moves();
@@ -303,7 +349,7 @@ fn main() {
             }
             match board.turn {
                 Color::White => {
-                    let posn = random_agent(&board);
+                    let posn = greedy_agent(&board);
                     board = board.play_move(posn);
                 }
                 Color::Black => {
@@ -323,6 +369,7 @@ fn main() {
     // Of statistical interest:
     // Given two opposing random model, the ratio of black wins to white wins to ties is ~45:50:5
     // Given greedy vs random, the ratio of black wins to white wins to ties is ~64:33:3
+    // Since greedy is deterministic, greedy vs greedy, white wins 100% of the time (fixed game)
     println!(
         "Black wins: {}, White wins: {}, Ties: {}",
         black_wins, white_wins, num_ties,
