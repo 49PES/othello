@@ -1,4 +1,7 @@
+use core::cmp::Ordering;
+use rand::Rng;
 use std::fmt::Display;
+use tqdm::tqdm;
 
 const ROWS: usize = 8;
 const COLS: usize = 8;
@@ -190,12 +193,14 @@ impl Board {
             .count()
     }
 
-    // Board -> (# of Black pieces, # of White pieces)
-    fn score(&self) -> (usize, usize) {
-        (
-            self.count_color_pieces(Color::Black),
-            self.count_color_pieces(Color::White),
-        )
+    fn is_not_full(&self) -> bool {
+        POSNS
+            .into_iter()
+            .any(|posn| self.piece_at(&posn) == Square::Unoccupied)
+    }
+    // Board -> # of White pieces - # of Black pieces
+    fn score(&self) -> i32 {
+        self.count_color_pieces(Color::White) as i32 - self.count_color_pieces(Color::Black) as i32
     }
 
     fn play_move(self, posn: Posn) -> Board {
@@ -254,7 +259,48 @@ impl Board {
             .collect()
     }
 }
+
+fn random_agent(board: &Board) -> Posn {
+    let legal_moves = board.legal_moves();
+    legal_moves[rand::thread_rng().gen_range(0..legal_moves.len())]
+}
+
 fn main() {
+    let mut white_wins = 0;
+    let mut black_wins = 0;
+    let mut num_ties = 0;
+    let num_iterations = 10000;
+    for _ in tqdm(0..num_iterations) {
+        let mut board = Board::new();
+
+        while board.is_not_full() {
+            // If player has no legal moves, play moves to opponent
+            if board.legal_moves().is_empty() {
+                board.turn = next_color(board.turn);
+                // If opponent has no legal moves, game is over
+                if board.legal_moves().is_empty() {
+                    break;
+                }
+                continue;
+            }
+            let posn = random_agent(&board);
+            board = board.play_move(posn);
+        }
+
+        match board.score().cmp(&0) {
+            Ordering::Less => black_wins += 1,
+            Ordering::Greater => white_wins += 1,
+            Ordering::Equal => num_ties += 1,
+        }
+    }
+
+    // Of statistical interest: given a random model, the ratio of black wins to white wins to ties is ~45:50:5
+    println!(
+        "Black wins: {}, White wins: {}, Ties: {}",
+        black_wins, white_wins, num_ties,
+    );
+
+    /*
     println!("Enter a legal alphanumeric position (e.g. \"e4\") to play a move");
     println!("Enter \"moves\" to see all legal moves");
     println!("Enter \"quit\" to quit the game");
@@ -313,4 +359,5 @@ fn main() {
         (black, white) if white > black => println!("White wins!"),
         _ => println!("Tie!"),
     }
+    */
 }
