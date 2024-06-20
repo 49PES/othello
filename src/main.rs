@@ -83,12 +83,15 @@ impl Display for Posn {
 impl Posn {
     // "a1" -> Posn { row: 0, col: 0 }
     // "e3" -> Posn { row: 2, col: 4 }
+
+    /*
     fn alphanumeric_to_posn(s: String) -> Posn {
         let s: Vec<char> = s.chars().collect();
         let row = s[1].to_digit(10).unwrap() as usize - 1;
         let col = s[0].to_ascii_lowercase() as usize - 'a' as usize;
         Posn { row, col }
     }
+    */
 
     fn try_from_tuple(coords: (i32, i32)) -> Option<Self> {
         if (0..ROWS as i32).contains(&coords.0) && (0..COLS as i32).contains(&coords.1) {
@@ -260,9 +263,24 @@ impl Board {
     }
 }
 
+// Random agent that chooses a random legal move
 fn random_agent(board: &Board) -> Posn {
     let legal_moves = board.legal_moves();
     legal_moves[rand::thread_rng().gen_range(0..legal_moves.len())]
+}
+
+// Greedy agent that chooses the move with the most potential flips
+fn greedy_agent(board: &Board) -> Posn {
+    let legal_moves = board.legal_moves();
+    *legal_moves
+        .iter()
+        .max_by(|a, b| {
+            board
+                .potential_flipped_pieces(a)
+                .len()
+                .cmp(&board.potential_flipped_pieces(b).len())
+        })
+        .unwrap()
 }
 
 fn main() {
@@ -277,14 +295,22 @@ fn main() {
             // If player has no legal moves, play moves to opponent
             if board.legal_moves().is_empty() {
                 board.turn = next_color(board.turn);
-                // If opponent has no legal moves, game is over
+                // If opponent also has no legal moves, game is over
                 if board.legal_moves().is_empty() {
                     break;
                 }
                 continue;
             }
-            let posn = random_agent(&board);
-            board = board.play_move(posn);
+            match board.turn {
+                Color::White => {
+                    let posn = random_agent(&board);
+                    board = board.play_move(posn);
+                }
+                Color::Black => {
+                    let posn = greedy_agent(&board);
+                    board = board.play_move(posn);
+                }
+            }
         }
 
         match board.score().cmp(&0) {
@@ -294,7 +320,9 @@ fn main() {
         }
     }
 
-    // Of statistical interest: given a random model, the ratio of black wins to white wins to ties is ~45:50:5
+    // Of statistical interest:
+    // Given two opposing random model, the ratio of black wins to white wins to ties is ~45:50:5
+    // Given greedy vs random, the ratio of black wins to white wins to ties is ~64:33:3
     println!(
         "Black wins: {}, White wins: {}, Ties: {}",
         black_wins, white_wins, num_ties,
