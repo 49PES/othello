@@ -227,14 +227,14 @@ impl Board {
         self.count_color_pieces(Color::White) as i32 - self.count_color_pieces(Color::Black) as i32
     }
 
-    fn play_move(self, posn: Posn) -> Board {
+    fn play_move(&self, posn: &Posn) -> Board {
         let mut board = self.clone();
 
-        let flipped_pieces = board.potential_flipped_pieces(&posn);
+        let flipped_pieces = board.potential_flipped_pieces(posn);
         for posn in flipped_pieces {
             board.set_piece_at(&posn, Square::Occupied(board.turn));
         }
-        board.set_piece_at(&posn, Square::Occupied(board.turn));
+        board.set_piece_at(posn, Square::Occupied(board.turn));
 
         board.turn = next_color(board.turn);
         board
@@ -315,18 +315,39 @@ fn random_agent(board: &Board) -> Posn {
     legal_moves[rand::thread_rng().gen_range(0..legal_moves.len())]
 }
 
-// Greedy agent that chooses the move with the most potential flips
-fn greedy_agent(board: &Board) -> Posn {
+/// Agent that chooses the move that optimizes the heuristic.
+/// Heuristic is positive if white is winning, negative if black is winning
+fn heuristic_agent(board: &Board, heuristic: fn(&Board) -> i32) -> Posn {
     let legal_moves = board.legal_moves();
-    *legal_moves
-        .iter()
-        .max_by(|a, b| {
-            board
-                .potential_flipped_pieces(a)
-                .len()
-                .cmp(&board.potential_flipped_pieces(b).len())
-        })
-        .unwrap()
+
+    match board.turn {
+        Color::White => {
+            *legal_moves
+                .iter()
+                .map(|posn| (posn, heuristic(&board.play_move(posn))))
+                .max_by(|a, b| a.1.cmp(&b.1))
+                .unwrap()
+                .0
+        }
+        Color::Black => {
+            *legal_moves
+                .iter()
+                .map(|posn| (posn, heuristic(&board.play_move(posn))))
+                .min_by(|a, b| a.1.cmp(&b.1))
+                .unwrap()
+                .0
+        }
+    }
+}
+
+fn mesh_agent(board: &Board) -> Posn {
+    let total_pieces =
+        board.count_color_pieces(Color::Black) + board.count_color_pieces(Color::White);
+    if total_pieces > ((ROWS * COLS) / 2) {
+        heuristic_agent(board, standard_heuristic)
+    } else {
+        heuristic_agent(board, edge_corner_heuristic)
+    }
 }
 
 fn main() {
@@ -349,12 +370,12 @@ fn main() {
             }
             match board.turn {
                 Color::White => {
-                    let posn = greedy_agent(&board);
-                    board = board.play_move(posn);
+                    let posn = heuristic_agent(&board, standard_heuristic);
+                    board = board.play_move(&posn);
                 }
                 Color::Black => {
-                    let posn = greedy_agent(&board);
-                    board = board.play_move(posn);
+                    let posn = random_agent(&board);
+                    board = board.play_move(&posn);
                 }
             }
         }
@@ -366,15 +387,91 @@ fn main() {
         }
     }
 
-    // Of statistical interest:
-    // Given two opposing random model, the ratio of black wins to white wins to ties is ~45:50:5
-    // Given greedy vs random, the ratio of black wins to white wins to ties is ~64:33:3
-    // Since greedy is deterministic, greedy vs greedy, white wins 100% of the time (fixed game)
+    println!("Standard heuristic vs random: ");
     println!(
         "Black wins: {}, White wins: {}, Ties: {}",
         black_wins, white_wins, num_ties,
     );
 
+    black_wins = 0;
+    white_wins = 0;
+    num_ties = 0;
+    for _ in tqdm(0..num_iterations) {
+        let mut board = Board::new();
+
+        while board.is_not_full() {
+            // If player has no legal moves, play moves to opponent
+            if board.legal_moves().is_empty() {
+                board.turn = next_color(board.turn);
+                // If opponent also has no legal moves, game is over
+                if board.legal_moves().is_empty() {
+                    break;
+                }
+                continue;
+            }
+            match board.turn {
+                Color::White => {
+                    let posn = heuristic_agent(&board, edge_corner_heuristic);
+                    board = board.play_move(&posn);
+                }
+                Color::Black => {
+                    let posn = random_agent(&board);
+                    board = board.play_move(&posn);
+                }
+            }
+        }
+        match board.score().cmp(&0) {
+            Ordering::Less => black_wins += 1,
+            Ordering::Greater => white_wins += 1,
+            Ordering::Equal => num_ties += 1,
+        }
+    }
+
+    println!("Edge and corner heuristic vs random: ");
+    println!(
+        "Black wins: {}, White wins: {}, Ties: {}",
+        black_wins, white_wins, num_ties,
+    );
+
+    black_wins = 0;
+    white_wins = 0;
+    num_ties = 0;
+    for _ in tqdm(0..num_iterations) {
+        let mut board = Board::new();
+
+        while board.is_not_full() {
+            // If player has no legal moves, play moves to opponent
+            if board.legal_moves().is_empty() {
+                board.turn = next_color(board.turn);
+                // If opponent also has no legal moves, game is over
+                if board.legal_moves().is_empty() {
+                    break;
+                }
+                continue;
+            }
+            match board.turn {
+                Color::White => {
+                    let posn = mesh_agent(&board);
+                    board = board.play_move(&posn);
+                }
+                Color::Black => {
+                    let posn = random_agent(&board);
+                    board = board.play_move(&posn);
+                }
+            }
+        }
+        match board.score().cmp(&0) {
+            Ordering::Less => black_wins += 1,
+            Ordering::Greater => white_wins += 1,
+            Ordering::Equal => num_ties += 1,
+        }
+    }
+
+    println!("Mesh heuristic vs random: ");
+    println!(
+        "Black wins: {}, White wins: {}, Ties: {}",
+        black_wins, white_wins, num_ties,
+    );
     /*
     println!("Enter a legal alphanumeric position (e.g. \"e4\") to play a move");
     println!("Enter \"moves\" to see all legal moves");
