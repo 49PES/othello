@@ -3,6 +3,11 @@ use rand::Rng;
 use std::fmt::Display;
 use tqdm::tqdm;
 
+use statrs::distribution::ContinuousCDF;
+use statrs::distribution::{Beta, Continuous};
+use statrs::prec;
+use statrs::statistics::*;
+
 const ROWS: usize = 8;
 const COLS: usize = 8;
 const DIRS: [Dir; 8] = [
@@ -222,6 +227,19 @@ impl Board {
             .any(|posn| self.piece_at(&posn) == Square::Unoccupied)
     }
 
+    /// Return a new board with the turn changed
+    fn change_turn(&self) -> Self {
+        Self {
+            squares: self.squares,
+            turn: next_color(self.turn),
+        }
+    }
+
+    /// Returns true if current player and opponent player have no legal moves
+    fn is_over(&self) -> bool {
+        self.legal_moves().is_empty() && self.change_turn().legal_moves().is_empty()
+    }
+
     /// Board → # of White pieces - # of Black pieces
     fn score(&self) -> i32 {
         self.count_color_pieces(Color::White) as i32 - self.count_color_pieces(Color::Black) as i32
@@ -340,10 +358,11 @@ fn heuristic_agent(board: &Board, heuristic: fn(&Board) -> i32) -> Posn {
     }
 }
 
+/// Use edge/corner heuristic until board is 4/5 full, then standard heuristic
 fn mesh_agent(board: &Board) -> Posn {
     let total_pieces =
         board.count_color_pieces(Color::Black) + board.count_color_pieces(Color::White);
-    if total_pieces > ((ROWS * COLS) / 2) {
+    if total_pieces > ((4 * ROWS * COLS) / 5) {
         heuristic_agent(board, standard_heuristic)
     } else {
         heuristic_agent(board, edge_corner_heuristic)
@@ -351,6 +370,16 @@ fn mesh_agent(board: &Board) -> Posn {
 }
 
 fn main() {
+    let n = Beta::new(2.0, 2.0).unwrap();
+    assert_eq!(n.mean().unwrap(), 0.5);
+    assert!(prec::almost_eq(n.pdf(0.5), 1.5, 1e-14));
+
+    println!(
+        "Credible Interval: {}, {}",
+        n.inverse_cdf(0.05),
+        n.inverse_cdf(0.95)
+    );
+
     let mut white_wins = 0;
     let mut black_wins = 0;
     let mut num_ties = 0;
@@ -358,19 +387,15 @@ fn main() {
     for _ in tqdm(0..num_iterations) {
         let mut board = Board::new();
 
-        while board.is_not_full() {
-            // If player has no legal moves, play moves to opponent
+        while !board.is_over() {
+            // If player has no legal moves, change turn to opponent
             if board.legal_moves().is_empty() {
-                board.turn = next_color(board.turn);
-                // If opponent also has no legal moves, game is over
-                if board.legal_moves().is_empty() {
-                    break;
-                }
-                continue;
+                board = board.change_turn();
             }
+
             match board.turn {
                 Color::White => {
-                    let posn = heuristic_agent(&board, standard_heuristic);
+                    let posn = mesh_agent(&board);
                     board = board.play_move(&posn);
                 }
                 Color::Black => {
@@ -393,85 +418,6 @@ fn main() {
         black_wins, white_wins, num_ties,
     );
 
-    black_wins = 0;
-    white_wins = 0;
-    num_ties = 0;
-    for _ in tqdm(0..num_iterations) {
-        let mut board = Board::new();
-
-        while board.is_not_full() {
-            // If player has no legal moves, play moves to opponent
-            if board.legal_moves().is_empty() {
-                board.turn = next_color(board.turn);
-                // If opponent also has no legal moves, game is over
-                if board.legal_moves().is_empty() {
-                    break;
-                }
-                continue;
-            }
-            match board.turn {
-                Color::White => {
-                    let posn = heuristic_agent(&board, edge_corner_heuristic);
-                    board = board.play_move(&posn);
-                }
-                Color::Black => {
-                    let posn = random_agent(&board);
-                    board = board.play_move(&posn);
-                }
-            }
-        }
-        match board.score().cmp(&0) {
-            Ordering::Less => black_wins += 1,
-            Ordering::Greater => white_wins += 1,
-            Ordering::Equal => num_ties += 1,
-        }
-    }
-
-    println!("Edge and corner heuristic vs random: ");
-    println!(
-        "Black wins: {}, White wins: {}, Ties: {}",
-        black_wins, white_wins, num_ties,
-    );
-
-    black_wins = 0;
-    white_wins = 0;
-    num_ties = 0;
-    for _ in tqdm(0..num_iterations) {
-        let mut board = Board::new();
-
-        while board.is_not_full() {
-            // If player has no legal moves, play moves to opponent
-            if board.legal_moves().is_empty() {
-                board.turn = next_color(board.turn);
-                // If opponent also has no legal moves, game is over
-                if board.legal_moves().is_empty() {
-                    break;
-                }
-                continue;
-            }
-            match board.turn {
-                Color::White => {
-                    let posn = mesh_agent(&board);
-                    board = board.play_move(&posn);
-                }
-                Color::Black => {
-                    let posn = random_agent(&board);
-                    board = board.play_move(&posn);
-                }
-            }
-        }
-        match board.score().cmp(&0) {
-            Ordering::Less => black_wins += 1,
-            Ordering::Greater => white_wins += 1,
-            Ordering::Equal => num_ties += 1,
-        }
-    }
-
-    println!("Mesh heuristic vs random: ");
-    println!(
-        "Black wins: {}, White wins: {}, Ties: {}",
-        black_wins, white_wins, num_ties,
-    );
     /*
     println!("Enter a legal alphanumeric position (e.g. \"e4\") to play a move");
     println!("Enter \"moves\" to see all legal moves");
