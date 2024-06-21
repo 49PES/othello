@@ -206,6 +206,22 @@ impl Display for Board {
 }
 
 impl Board {
+    fn random_set_up() -> Self {
+        let mut board = Self::new();
+        let mut rng = rand::thread_rng();
+        for _ in 0..4 {
+            board.set_piece_at(
+                board
+                    .legal_moves()
+                    .get(rng.gen_range(0..board.legal_moves().len()))
+                    .unwrap(),
+                Square::Occupied(board.turn),
+            );
+            board = board.change_turn();
+        }
+
+        board
+    }
     fn piece_at(&self, posn: &Posn) -> Square {
         self.squares[posn.row][posn.col]
     }
@@ -384,6 +400,45 @@ fn main() {
     let mut black_wins = 0;
     let mut num_ties = 0;
     let num_iterations = 10000;
+
+    for _ in tqdm(0..num_iterations) {
+        let mut board = Board::random_set_up();
+
+        while !board.is_over() {
+            // If player has no legal moves, change turn to opponent
+            if board.legal_moves().is_empty() {
+                board = board.change_turn();
+            }
+
+            match board.turn {
+                Color::White => {
+                    let posn = heuristic_agent(&board, standard_heuristic);
+                    board = board.play_move(&posn);
+                }
+                Color::Black => {
+                    let posn = heuristic_agent(&board, edge_corner_heuristic);
+                    board = board.play_move(&posn);
+                }
+            }
+        }
+
+        match board.score().cmp(&0) {
+            Ordering::Less => black_wins += 1,
+            Ordering::Greater => white_wins += 1,
+            Ordering::Equal => num_ties += 1,
+        }
+    }
+
+    println!("edge corner heuristic vs standard heuristic: ");
+    println!(
+        "Black wins: {}, White wins: {}, Ties: {}",
+        black_wins, white_wins, num_ties
+    );
+    /*
+    let mut white_wins = 0;
+    let mut black_wins = 0;
+    let mut num_ties = 0;
+    let num_iterations = 10000;
     for _ in tqdm(0..num_iterations) {
         let mut board = Board::new();
 
@@ -418,6 +473,7 @@ fn main() {
         black_wins, white_wins, num_ties,
     );
 
+    */
     /*
     println!("Enter a legal alphanumeric position (e.g. \"e4\") to play a move");
     println!("Enter \"moves\" to see all legal moves");
