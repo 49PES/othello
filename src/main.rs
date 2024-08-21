@@ -8,6 +8,8 @@ use statrs::distribution::{Beta, Continuous};
 use statrs::prec;
 use statrs::statistics::*;
 
+use coz;
+
 const ROWS: usize = 8;
 const COLS: usize = 8;
 const DIRS: [Dir; 8] = [
@@ -89,14 +91,12 @@ impl Posn {
     // "a1" -> Posn { row: 0, col: 0 }
     // "e3" -> Posn { row: 2, col: 4 }
 
-    /*
     fn alphanumeric_to_posn(s: String) -> Posn {
         let s: Vec<char> = s.chars().collect();
         let row = s[1].to_digit(10).unwrap() as usize - 1;
         let col = s[0].to_ascii_lowercase() as usize - 'a' as usize;
         Posn { row, col }
     }
-    */
 
     fn try_from_tuple(coords: (i32, i32)) -> Option<Self> {
         if (0..ROWS as i32).contains(&coords.0) && (0..COLS as i32).contains(&coords.1) {
@@ -237,12 +237,6 @@ impl Board {
             .count()
     }
 
-    fn is_not_full(&self) -> bool {
-        POSNS
-            .into_iter()
-            .any(|posn| self.piece_at(&posn) == Square::Unoccupied)
-    }
-
     /// Return a new board with the turn changed
     fn change_turn(&self) -> Self {
         Self {
@@ -254,6 +248,19 @@ impl Board {
     /// Returns true if current player and opponent player have no legal moves
     fn is_over(&self) -> bool {
         self.legal_moves().is_empty() && self.change_turn().legal_moves().is_empty()
+    }
+
+    fn winner(&self) -> Option<Color> {
+        if self.is_over() {
+            // Positive score means white won, negative means black won, zero means tie
+            match self.score().cmp(&0) {
+                Ordering::Greater => Some(Color::White),
+                Ordering::Less => Some(Color::Black),
+                Ordering::Equal => None,
+            }
+        } else {
+            None // No winner if the game isn't over yet
+        }
     }
 
     /// Board → # of White pieces - # of Black pieces
@@ -305,7 +312,7 @@ impl Board {
             }
             curr_neighbor = curr.neighbor_in_dir(&dir);
         }
-
+        coz::progress!("Potential flipped pieces in dir");
         // We've run off the board: if we haven't already returned, then there's no second tile to
         // surround any of the current line, and there's no flips in this direction
         vec![]
@@ -325,19 +332,19 @@ fn standard_heuristic(board: &Board) -> i32 {
 /// Heuristic that favors edge and corner positions (corners/edges/else = 4/2/1)
 fn edge_corner_heuristic(board: &Board) -> i32 {
     fn color_weighted_score(board: &Board, color: Color) -> i32 {
-        let mut total = 0;
-        for posn in POSNS {
-            if board.piece_at(&posn) == Square::Occupied(color) {
-                total += if posn.is_corner() {
+        POSNS
+            .into_iter()
+            .filter(|posn| board.piece_at(posn) == Square::Occupied(color))
+            .map(|posn| {
+                if posn.is_corner() {
                     4
                 } else if posn.is_edge() {
                     2
                 } else {
                     1
                 }
-            }
-        }
-        total
+            })
+            .sum()
     }
 
     color_weighted_score(board, Color::White) - color_weighted_score(board, Color::Black)
@@ -354,23 +361,15 @@ fn random_agent(board: &Board) -> Posn {
 fn heuristic_agent(board: &Board, heuristic: fn(&Board) -> i32) -> Posn {
     let legal_moves = board.legal_moves();
 
+    // Map the potential states of the board to (posn, scores) using the provided heuristic
+    let scores = legal_moves
+        .iter()
+        .map(|posn| (posn, heuristic(&board.play_move(posn))));
+
+    // White is maximizing, black is minimizing
     match board.turn {
-        Color::White => {
-            *legal_moves
-                .iter()
-                .map(|posn| (posn, heuristic(&board.play_move(posn))))
-                .max_by(|a, b| a.1.cmp(&b.1))
-                .unwrap()
-                .0
-        }
-        Color::Black => {
-            *legal_moves
-                .iter()
-                .map(|posn| (posn, heuristic(&board.play_move(posn))))
-                .min_by(|a, b| a.1.cmp(&b.1))
-                .unwrap()
-                .0
-        }
+        Color::White => *scores.max_by(|a, b| a.1.cmp(&b.1)).unwrap().0,
+        Color::Black => *scores.min_by(|a, b| a.1.cmp(&b.1)).unwrap().0,
     }
 }
 
@@ -385,21 +384,74 @@ fn mesh_agent(board: &Board) -> Posn {
     }
 }
 
-fn main() {
-    let n = Beta::new(2.0, 2.0).unwrap();
-    assert_eq!(n.mean().unwrap(), 0.5);
-    assert!(prec::almost_eq(n.pdf(0.5), 1.5, 1e-14));
+/// Minimax, where white is maximizing and black is minimizing
+fn minimax(board: &Board, depth: i32, heuristic: fn(&Board) -> i32) -> i32 {
+    if board.is_over() {
+        return match board.winner() {
+            Some(Color::Black) => i32::MIN,
+            Some(Color::White) => i32::MAX,
+            None => 0,
+        };
+    }
+    if depth == 0 {
+        return heuristic(board);
+    }
+    let legal_moves = board.legal_moves();
 
-    println!(
-        "Credible Interval: {}, {}",
-        n.inverse_cdf(0.05),
-        n.inverse_cdf(0.95)
-    );
+    // Start with the worst score possible (i32::MIN or i32::MAX for white/black respectively)
+    let mut best_score = match board.turn {
+        Color::White => i32::MIN,
+        Color::Black => i32::MAX,
+    };
+
+    for posn in legal_moves {
+        let new_board = board.play_move(&posn);
+        let new_score = minimax(&new_board, depth - 1, heuristic);
+
+        match board.turn {
+            Color::White => {
+                if new_score > best_score {
+                    if new_score == i32::MAX {
+                        return new_score;
+                    }
+                    best_score = new_score;
+                }
+            }
+            Color::Black => {
+                if new_score < best_score {
+                    if new_score == i32::MIN {
+                        return new_score;
+                    }
+                    best_score = new_score;
+                }
+            }
+        }
+    }
+
+    best_score
+}
+
+fn minimax_agent(board: &Board, depth: i32, heuristic: fn(&Board) -> i32) -> Posn {
+    let legal_moves = board.legal_moves();
+    match board.turn {
+        Color::White => *legal_moves
+            .iter()
+            .max_by_key(|p| minimax(&board.play_move(p), depth - 1, heuristic))
+            .unwrap(),
+        Color::Black => *legal_moves
+            .iter()
+            .min_by_key(|p| minimax(&board.play_move(p), depth - 1, heuristic))
+            .unwrap(),
+    }
+}
+
+fn main() {
+    let mut n = Beta::new(2.0, 2.0).unwrap();
 
     let mut white_wins = 0;
     let mut black_wins = 0;
     let mut num_ties = 0;
-    let num_iterations = 10000;
+    let num_iterations = 40;
 
     for _ in tqdm(0..num_iterations) {
         let mut board = Board::random_set_up();
@@ -416,24 +468,37 @@ fn main() {
                     board = board.play_move(&posn);
                 }
                 Color::Black => {
-                    let posn = heuristic_agent(&board, edge_corner_heuristic);
+                    let posn = minimax_agent(&board, 3, edge_corner_heuristic);
                     board = board.play_move(&posn);
                 }
             }
         }
 
-        match board.score().cmp(&0) {
-            Ordering::Less => black_wins += 1,
-            Ordering::Greater => white_wins += 1,
-            Ordering::Equal => num_ties += 1,
+        match board.winner() {
+            Some(Color::Black) => {
+                black_wins += 1;
+                n = Beta::new(n.shape_a(), n.shape_b() + 1.0).unwrap()
+            }
+            Some(Color::White) => {
+                white_wins += 1;
+                n = Beta::new(n.shape_a() + 1.0, n.shape_b()).unwrap()
+            }
+            None => num_ties += 1,
         }
     }
 
-    println!("edge corner heuristic vs standard heuristic: ");
+    println!("Minimax depth 3 w/ edge corner heuristic vs standard heuristic: ");
     println!(
         "Black wins: {}, White wins: {}, Ties: {}",
         black_wins, white_wins, num_ties
     );
+
+    println!(
+        "Credible Interval: {:.2}%, {:.2}%",
+        n.inverse_cdf(0.05) * 100.0,
+        n.inverse_cdf(0.95) * 100.0
+    );
+
     /*
     let mut white_wins = 0;
     let mut black_wins = 0;
@@ -474,7 +539,7 @@ fn main() {
     );
 
     */
-    /*
+
     println!("Enter a legal alphanumeric position (e.g. \"e4\") to play a move");
     println!("Enter \"moves\" to see all legal moves");
     println!("Enter \"quit\" to quit the game");
@@ -523,15 +588,14 @@ fn main() {
             println!("Invalid move");
             continue;
         }
-        board = board.play_move(posn);
+        board = board.play_move(&posn);
         println!("{}", board);
     }
 
     println!("Score: {:?}", board.score());
-    match board.score() {
-        (black, white) if black > white => println!("Black wins!"),
-        (black, white) if white > black => println!("White wins!"),
-        _ => println!("Tie!"),
+    match board.winner() {
+        Some(Color::Black) => println!("Black wins!"),
+        Some(Color::White) => println!("White wins!"),
+        None => println!("No winner"),
     }
-    */
 }
