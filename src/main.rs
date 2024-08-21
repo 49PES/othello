@@ -272,10 +272,10 @@ impl Board {
         let mut board = self.clone();
 
         let flipped_pieces = board.potential_flipped_pieces(posn);
+        board.set_piece_at(posn, Square::Occupied(board.turn));
         for posn in flipped_pieces {
             board.set_piece_at(&posn, Square::Occupied(board.turn));
         }
-        board.set_piece_at(posn, Square::Occupied(board.turn));
 
         board.turn = next_color(board.turn);
         board
@@ -368,8 +368,8 @@ fn heuristic_agent(board: &Board, heuristic: fn(&Board) -> i32) -> Posn {
 
     // White is maximizing, black is minimizing
     match board.turn {
-        Color::White => *scores.max_by(|a, b| a.1.cmp(&b.1)).unwrap().0,
-        Color::Black => *scores.min_by(|a, b| a.1.cmp(&b.1)).unwrap().0,
+        Color::White => *scores.max_by_key(|p| p.1).unwrap().0,
+        Color::Black => *scores.min_by_key(|p| p.1).unwrap().0,
     }
 }
 
@@ -398,37 +398,15 @@ fn minimax(board: &Board, depth: i32, heuristic: fn(&Board) -> i32) -> i32 {
     }
     let legal_moves = board.legal_moves();
 
-    // Start with the worst score possible (i32::MIN or i32::MAX for white/black respectively)
-    let mut best_score = match board.turn {
-        Color::White => i32::MIN,
-        Color::Black => i32::MAX,
-    };
+    let scores = legal_moves.iter().map(|legal_move| {
+        let new_board = board.play_move(legal_move);
+        minimax(&new_board, depth - 1, heuristic)
+    });
 
-    for posn in legal_moves {
-        let new_board = board.play_move(&posn);
-        let new_score = minimax(&new_board, depth - 1, heuristic);
-
-        match board.turn {
-            Color::White => {
-                if new_score > best_score {
-                    if new_score == i32::MAX {
-                        return new_score;
-                    }
-                    best_score = new_score;
-                }
-            }
-            Color::Black => {
-                if new_score < best_score {
-                    if new_score == i32::MIN {
-                        return new_score;
-                    }
-                    best_score = new_score;
-                }
-            }
-        }
+    match board.turn {
+        Color::White => scores.max().unwrap_or(i32::MIN),
+        Color::Black => scores.min().unwrap_or(i32::MAX),
     }
-
-    best_score
 }
 
 fn minimax_agent(board: &Board, depth: i32, heuristic: fn(&Board) -> i32) -> Posn {
@@ -451,7 +429,7 @@ fn main() {
     let mut white_wins = 0;
     let mut black_wins = 0;
     let mut num_ties = 0;
-    let num_iterations = 40;
+    let num_iterations = 100;
 
     for _ in tqdm(0..num_iterations) {
         let mut board = Board::random_set_up();
@@ -498,47 +476,6 @@ fn main() {
         n.inverse_cdf(0.05) * 100.0,
         n.inverse_cdf(0.95) * 100.0
     );
-
-    /*
-    let mut white_wins = 0;
-    let mut black_wins = 0;
-    let mut num_ties = 0;
-    let num_iterations = 10000;
-    for _ in tqdm(0..num_iterations) {
-        let mut board = Board::new();
-
-        while !board.is_over() {
-            // If player has no legal moves, change turn to opponent
-            if board.legal_moves().is_empty() {
-                board = board.change_turn();
-            }
-
-            match board.turn {
-                Color::White => {
-                    let posn = mesh_agent(&board);
-                    board = board.play_move(&posn);
-                }
-                Color::Black => {
-                    let posn = random_agent(&board);
-                    board = board.play_move(&posn);
-                }
-            }
-        }
-
-        match board.score().cmp(&0) {
-            Ordering::Less => black_wins += 1,
-            Ordering::Greater => white_wins += 1,
-            Ordering::Equal => num_ties += 1,
-        }
-    }
-
-    println!("Standard heuristic vs random: ");
-    println!(
-        "Black wins: {}, White wins: {}, Ties: {}",
-        black_wins, white_wins, num_ties,
-    );
-
-    */
 
     println!("Enter a legal alphanumeric position (e.g. \"e4\") to play a move");
     println!("Enter \"moves\" to see all legal moves");
